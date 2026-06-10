@@ -152,6 +152,11 @@ def download_with_ytdl(url, format_type, unique_id, progress_callback=None):
         'quiet': True,
         'no_warnings': True,
         'progress_hooks': [ytdl_hook],
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['ios', 'android']
+            }
+        }
     }
     
     if format_type == 'mp3':
@@ -284,6 +289,11 @@ def get_direct_url(url, format_type):
             'quiet': True,
             'no_warnings': True,
             'format': 'bestaudio/best' if is_mp3 else 'best',
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['ios', 'android']
+                }
+            }
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
