@@ -4,6 +4,8 @@ import time
 import uuid
 import requests
 import yt_dlp
+import subprocess
+from urllib.parse import urlparse, parse_qs
 from playwright.sync_api import sync_playwright
 
 # Temporary downloads folder in the project directory
@@ -197,6 +199,213 @@ def download_with_ytdl(url, format_type, unique_id, progress_callback=None):
         
     return None, "Video", None
 
+def get_youtube_direct_url_playwright(url, format_type):
+    """
+    Fallback method using Playwright to extract direct URL for YouTube
+    when yt-dlp is blocked by PO Token.
+    """
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            is_mp3 = (format_type == 'mp3')
+            if is_mp3:
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
+            else:
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+                    viewport={"width": 360, "height": 640},
+                    is_mobile=True
+                )
+
+            page = context.new_page()
+            captured_url = None
+            
+            def handle_request(request):
+                nonlocal captured_url
+                req_url = request.url
+                if "googlevideo.com/videoplayback" in req_url:
+                    parsed = urlparse(req_url)
+                    params = parse_qs(parsed.query)
+                    mime = params.get('mime', [''])[0]
+                    itag = params.get('itag', [''])[0]
+                    
+                    if is_mp3:
+                        if "audio/" in mime:
+                            captured_url = req_url
+                    else:
+                        if itag in ['18', '22'] or ("video/" in mime and "audio" in mime):
+                            captured_url = req_url
+                        elif not captured_url and "video/mp4" in mime:
+                            captured_url = req_url
+
+            page.on("request", handle_request)
+            
+            mobile_url = url.replace("www.youtube.com", "m.youtube.com") if not is_mp3 else url
+            page.goto(mobile_url, wait_until="domcontentloaded", timeout=20000)
+            
+            try:
+                page.wait_for_selector("video", timeout=10000)
+                page.evaluate("document.querySelector('video').play()")
+            except Exception:
+                pass
+                
+            start_wait = time.time()
+            while not captured_url and time.time() - start_wait < 10:
+                time.sleep(0.5)
+                
+            title = page.title()
+            for suffix in [" - YouTube", " - YouTube Mobile", " - YouTube Music"]:
+                if title.endswith(suffix):
+                    title = title[:-len(suffix)]
+            title = clean_str(title)
+            
+            browser.close()
+            if captured_url:
+                return captured_url, title
+    except Exception as e:
+        print(f"[Playwright YouTube direct url] failed: {e}")
+    return None, None
+
+def download_youtube_playwright(url, format_type, unique_id, progress_callback=None):
+    """
+    Downloads YouTube video or audio by using Playwright to play the video in a headless
+    browser and intercept the decrypted googlevideo.com streaming URLs.
+    """
+    video_url = None
+    audio_url = None
+    video_size = 0
+    audio_size = 0
+    title = "YouTube Video"
+    
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            page = context.new_page()
+            
+            def handle_request(request):
+                nonlocal video_url, audio_url, video_size, audio_size
+                req_url = request.url
+                if "googlevideo.com/videoplayback" in req_url:
+                    parsed = urlparse(req_url)
+                    params = parse_qs(parsed.query)
+                    mime = params.get('mime', [''])[0]
+                    itag = params.get('itag', [''])[0]
+                    clen = int(params.get('clen', [0])[0])
+                    
+                    if "video/" in mime and "audio" not in mime:
+                        if clen > video_size:
+                            video_url = req_url
+                            video_size = clen
+                    elif "audio/" in mime:
+                        if clen > audio_size:
+                            audio_url = req_url
+                            audio_size = clen
+
+            page.on("request", handle_request)
+            page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            
+            try:
+                page.wait_for_selector("video", timeout=10000)
+                page.evaluate("document.querySelector('video').play()")
+            except Exception:
+                pass
+                
+            start_wait = time.time()
+            if format_type == 'mp3':
+                while not audio_url and time.time() - start_wait < 15:
+                    time.sleep(0.5)
+            else:
+                while (not video_url or not audio_url) and time.time() - start_wait < 15:
+                    time.sleep(0.5)
+                    
+            title = page.title()
+            for suffix in [" - YouTube", " - YouTube Mobile", " - YouTube Music"]:
+                if title.endswith(suffix):
+                    title = title[:-len(suffix)]
+            title = clean_str(title)
+            
+            browser.close()
+    except Exception as e:
+        print(f"[download_youtube_playwright] Playwright interception failed: {e}")
+        
+    if format_type == 'mp3':
+        if not audio_url:
+            return None, "YouTube Video", None
+            
+        temp_audio = os.path.join(TEMP_DIR, f"{unique_id}_temp_audio")
+        dest_file = os.path.join(TEMP_DIR, f"{unique_id}.mp3")
+        
+        try:
+            download_direct_url(audio_url, temp_audio, progress_callback)
+            if progress_callback:
+                progress_callback(99.0, "Converting...", audio_size, audio_size)
+                
+            subprocess.run([
+                "ffmpeg", "-y", "-i", temp_audio,
+                "-vn", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+                dest_file
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            if os.path.exists(dest_file):
+                return dest_file, title, audio_url
+        except Exception as e:
+            print(f"[download_youtube_playwright] MP3 conversion failed: {e}")
+        finally:
+            if os.path.exists(temp_audio):
+                os.remove(temp_audio)
+    else:
+        if not video_url or not audio_url:
+            prog_url, _ = get_youtube_direct_url_playwright(url, 'mp4')
+            if prog_url:
+                dest_file = os.path.join(TEMP_DIR, f"{unique_id}.mp4")
+                try:
+                    download_direct_url(prog_url, dest_file, progress_callback)
+                    return dest_file, title, prog_url
+                except Exception as e:
+                    print(f"[download_youtube_playwright] Progressive fallback failed: {e}")
+            return None, "YouTube Video", None
+            
+        temp_video = os.path.join(TEMP_DIR, f"{unique_id}_temp_video")
+        temp_audio = os.path.join(TEMP_DIR, f"{unique_id}_temp_audio")
+        dest_file = os.path.join(TEMP_DIR, f"{unique_id}.mp4")
+        
+        try:
+            def video_progress(percent, speed, downloaded, total):
+                if progress_callback:
+                    progress_callback(percent * 0.70, speed, downloaded, total)
+                    
+            def audio_progress(percent, speed, downloaded, total):
+                if progress_callback:
+                    progress_callback(70.0 + (percent * 0.30), speed, downloaded, total)
+            
+            download_direct_url(video_url, temp_video, video_progress)
+            download_direct_url(audio_url, temp_audio, audio_progress)
+            
+            if progress_callback:
+                progress_callback(99.0, "Merging...", video_size + audio_size, video_size + audio_size)
+                
+            subprocess.run([
+                "ffmpeg", "-y", "-i", temp_video, "-i", temp_audio,
+                "-c", "copy", "-map", "0:v:0", "-map", "1:a:0",
+                "-movflags", "+faststart", dest_file
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            if os.path.exists(dest_file):
+                return dest_file, title, video_url
+        except Exception as e:
+            print(f"[download_youtube_playwright] Merge failed: {e}")
+        finally:
+            for temp_f in [temp_video, temp_audio]:
+                if os.path.exists(temp_f):
+                    os.remove(temp_f)
+                    
+    return None, "YouTube Video", None
+
 def download_media(url, format_type, progress_callback=None):
     """
     Main entry point to download video/audio.
@@ -218,6 +427,11 @@ def download_media(url, format_type, progress_callback=None):
     # Generic handling via yt-dlp for other URLs
     if not file_path:
         file_path, title, direct_url = download_with_ytdl(url, format_type, unique_id, progress_callback)
+
+    # Fallback for YouTube via Playwright network interception if yt-dlp fails
+    if not file_path and is_youtube_url(url):
+        print("[FALLBACK] yt-dlp failed for YouTube. Attempting Playwright fallback...")
+        file_path, title, direct_url = download_youtube_playwright(url, format_type, unique_id, progress_callback)
 
     if file_path and os.path.exists(file_path):
         size_bytes = os.path.getsize(file_path)
@@ -323,6 +537,13 @@ def get_direct_url(url, format_type):
                 return best['url'], title
     except Exception as e:
         print(f"[get_direct_url] yt-dlp info failed: {e}")
+
+    # Fallback for YouTube via Playwright if yt-dlp fails
+    if is_youtube_url(url):
+        print("[FALLBACK] yt-dlp get_direct_url failed. Attempting Playwright fallback...")
+        pw_url, pw_title = get_youtube_direct_url_playwright(url, format_type)
+        if pw_url:
+            return pw_url, pw_title
 
     return None, None
 

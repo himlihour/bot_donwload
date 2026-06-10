@@ -1,6 +1,9 @@
 # Use Microsoft's official Playwright Python base image (contains all browsers and OS dependencies)
 FROM mcr.microsoft.com/playwright/python:v1.45.0-jammy
 
+# Install system-wide FFmpeg
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
 # Set up app directory
 WORKDIR /app
 
