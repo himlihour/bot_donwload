@@ -485,5 +485,17 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"[WARNING] Failed to start Render dummy server: {e}")
             
-    # Use infinity_polling to keep running and automatically retry on connection issues
-    bot.infinity_polling(skip_pending=True)
+    # Resilient polling loop to handle deployment transition conflicts
+    while True:
+        try:
+            bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=20)
+        except telebot.apihelper.ApiTelegramException as e:
+            if e.error_code == 409:
+                print(f"[CONFLICT] Another instance is running. Retrying in 10 seconds... ({e})")
+                time.sleep(10)
+            else:
+                print(f"[ERROR] Telegram API Error: {e}. Retrying in 5 seconds...")
+                time.sleep(5)
+        except Exception as e:
+            print(f"[ERROR] Unexpected error: {e}. Retrying in 5 seconds...")
+            time.sleep(5)
