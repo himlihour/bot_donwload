@@ -16,6 +16,18 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 PC_DOWNLOADS_DIR = os.path.join(os.path.expanduser('~'), 'Downloads')
 os.makedirs(PC_DOWNLOADS_DIR, exist_ok=True)
 
+COOKIES_FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cookies.txt')
+
+# Check if environment variable YOUTUBE_COOKIES is set. If so, write to cookies.txt dynamically
+env_cookies = os.getenv("YOUTUBE_COOKIES")
+if env_cookies:
+    try:
+        with open(COOKIES_FILE_PATH, 'w', encoding='utf-8') as f:
+            f.write(env_cookies)
+        print("[COOKIES] Loaded YouTube cookies from environment variable YOUTUBE_COOKIES.")
+    except Exception as e:
+        print(f"[COOKIES] Failed to write environment cookies: {e}")
+
 def is_tiktok_url(url):
     return 'tiktok.com' in url or 'vt.tiktok.com' in url
 
@@ -161,6 +173,9 @@ def download_with_ytdl(url, format_type, unique_id, progress_callback=None):
         }
     }
     
+    if os.path.exists(COOKIES_FILE_PATH):
+        ydl_opts['cookiefile'] = COOKIES_FILE_PATH
+    
     if format_type == 'mp3':
         ydl_opts.update({
             'format': 'bestaudio/best',
@@ -199,6 +214,44 @@ def download_with_ytdl(url, format_type, unique_id, progress_callback=None):
         
     return None, "Video", None
 
+def load_netscape_cookies(cookies_file_path):
+    """
+    Parses a Netscape format cookies file and returns cookies in Playwright's format.
+    """
+    cookies = []
+    try:
+        with open(cookies_file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                parts = line.split('\t')
+                if len(parts) >= 7:
+                    domain = parts[0]
+                    flag = parts[1]
+                    path = parts[2]
+                    secure = parts[3].upper() == 'TRUE'
+                    try:
+                        expires = int(parts[4])
+                    except ValueError:
+                        expires = None
+                    name = parts[5]
+                    value = parts[6]
+                    
+                    cookie = {
+                        'name': name,
+                        'value': value,
+                        'domain': domain,
+                        'path': path,
+                        'secure': secure
+                    }
+                    if expires is not None and expires > 0:
+                        cookie['expires'] = expires
+                    cookies.append(cookie)
+    except Exception as e:
+        print(f"[COOKIES] Error parsing cookies file: {e}")
+    return cookies
+
 def get_youtube_direct_url_playwright(url, format_type):
     """
     Fallback method using Playwright to extract direct URL for YouTube
@@ -218,6 +271,12 @@ def get_youtube_direct_url_playwright(url, format_type):
                     viewport={"width": 360, "height": 640},
                     is_mobile=True
                 )
+
+            # Load YouTube cookies if available
+            if os.path.exists(COOKIES_FILE_PATH):
+                pw_cookies = load_netscape_cookies(COOKIES_FILE_PATH)
+                if pw_cookies:
+                    context.add_cookies(pw_cookies)
 
             page = context.new_page()
             captured_url = None
@@ -285,6 +344,13 @@ def download_youtube_playwright(url, format_type, unique_id, progress_callback=N
             context = browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
+            
+            # Load YouTube cookies if available
+            if os.path.exists(COOKIES_FILE_PATH):
+                pw_cookies = load_netscape_cookies(COOKIES_FILE_PATH)
+                if pw_cookies:
+                    context.add_cookies(pw_cookies)
+
             page = context.new_page()
             
             def handle_request(request):
@@ -509,6 +575,8 @@ def get_direct_url(url, format_type):
                 }
             }
         }
+        if os.path.exists(COOKIES_FILE_PATH):
+            ydl_opts['cookiefile'] = COOKIES_FILE_PATH
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             title = info.get("title") or "Video"
