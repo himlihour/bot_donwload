@@ -18,6 +18,50 @@ os.makedirs(PC_DOWNLOADS_DIR, exist_ok=True)
 
 COOKIES_FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cookies.txt')
 
+def verify_cookies_file():
+    if not os.path.exists(COOKIES_FILE_PATH):
+        print("[COOKIES] No cookies.txt file found.")
+        return False
+        
+    try:
+        count = 0
+        has_youtube_domain = False
+        has_auth_cookies = False
+        
+        with open(COOKIES_FILE_PATH, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                # Netscape cookies are tab-separated
+                parts = line.split('\t')
+                if len(parts) >= 7:
+                    count += 1
+                    domain = parts[0]
+                    name = parts[5]
+                    if 'youtube.com' in domain:
+                        has_youtube_domain = True
+                    if name in ['__Secure-3PSID', 'SID', 'HSID', '__Secure-3PAPISID']:
+                        has_auth_cookies = True
+                        
+        print(f"[COOKIES] Verification details: successfully parsed {count} cookies.")
+        if count == 0:
+            print("[COOKIES] WARNING: Parsed 0 cookies. Make sure the YOUTUBE_COOKIES variable contains a valid tab-separated Netscape cookie format (e.g. starting with '# Netscape HTTP Cookie File').")
+            # Log the first 100 characters of the env variable to help debug
+            raw_env = os.getenv("YOUTUBE_COOKIES") or ""
+            preview = raw_env[:100].replace('\n', ' ')
+            print(f"[COOKIES] Environment Variable Preview: '{preview}...' (Length: {len(raw_env)} bytes)")
+            return False
+            
+        if not has_youtube_domain:
+            print("[COOKIES] WARNING: No cookies for 'youtube.com' found in cookies.txt.")
+        if not has_auth_cookies:
+            print("[COOKIES] WARNING: Active YouTube login session cookies (like SID or __Secure-3PSID) were not found. You might need to log in to YouTube in your browser before exporting.")
+        return True
+    except Exception as e:
+        print(f"[COOKIES] Failed to verify cookies: {e}")
+        return False
+
 # Check if environment variable YOUTUBE_COOKIES is set. If so, write to cookies.txt dynamically
 env_cookies = os.getenv("YOUTUBE_COOKIES")
 if env_cookies:
@@ -27,6 +71,9 @@ if env_cookies:
         print("[COOKIES] Loaded YouTube cookies from environment variable YOUTUBE_COOKIES.")
     except Exception as e:
         print(f"[COOKIES] Failed to write environment cookies: {e}")
+
+# Perform verification on startup
+verify_cookies_file()
 
 def is_tiktok_url(url):
     return 'tiktok.com' in url or 'vt.tiktok.com' in url
