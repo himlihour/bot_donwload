@@ -259,7 +259,7 @@ def get_youtube_direct_url_playwright(url, format_type):
     """
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
             is_mp3 = (format_type == 'mp3')
             if is_mp3:
                 context = browser.new_context(
@@ -340,7 +340,7 @@ def download_youtube_playwright(url, format_type, unique_id, progress_callback=N
     
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
             context = browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
@@ -536,7 +536,7 @@ def get_direct_url(url, format_type):
     if is_facebook_url(url):
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
+                browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
                 context = browser.new_context()
                 page = context.new_page()
                 page.goto(url, wait_until="networkidle", timeout=30000)
@@ -661,7 +661,7 @@ def download_facebook_playwright(url, format_type, unique_id, progress_callback=
     """
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
             context = browser.new_context()
             page = context.new_page()
             page.goto(url, wait_until="networkidle", timeout=30000)

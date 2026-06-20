@@ -321,37 +321,67 @@ def download_and_process_media(chat_id, message_id, url, format_type):
                 pass
                 
         else:
-            # File is > 50MB, save to PC Downloads and provide link
-            pc_path = os.path.join(PC_DOWNLOADS_DIR, clean_filename)
-            counter = 1
-            base, extension = os.path.splitext(pc_path)
-            while os.path.exists(pc_path):
-                pc_path = f"{base}_{counter}{extension}"
-                counter += 1
+            # File is > 50MB, check if we are running on Render
+            is_render = (os.getenv("RENDER") == "true") or (os.getenv("PORT") is not None)
+            
+            if is_render:
+                # Delete the large file immediately to avoid filling up server disk space
+                if file_path and os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except Exception as ex:
+                        print(f"Cleanup failed for large file on Render: {ex}")
+                file_path = None
                 
-            shutil.move(file_path, pc_path)
-            file_path = None # Set to None so finally block doesn't delete it
-            
-            # Escape & in URL for HTML href
-            safe_url = (direct_url or "").replace('&', '&amp;')
-            
-            if safe_url:
-                result_text = (
-                    f"⚠️ <b>ឯកសារធំពេកសម្រាប់ Telegram (>50MB)</b>\n\n"
-                    f"💾 បានរក្សាទុកក្នុងថត Downloads លើកុំព្យូទ័ររបស់អ្នក៖\n"
-                    f"<code>{os.path.basename(pc_path)}</code>\n\n"
-                    f"🔗 តំណភ្ជាប់ទាញយកជំនួសពី Browser៖\n"
-                    f'<a href="{safe_url}">ទាញយកតាមរយៈ Browser</a>\n\n'
-                    f"📋 <b>ឈ្មោះឯកសារ (ចុចលើវាដើម្បីចម្លង)៖</b>\n"
-                    f"<code>{os.path.basename(pc_path)}</code>\n\n"
-                    f"<i>ចំណាំ៖ ការទាញយកតាម Browser នឹងមានឈ្មោះឯកសារលំនាំដើមរបស់ប្រប្រព័ន្ធ។ អ្នកអាចបិទភ្ជាប់ឈ្មោះដែលបានចម្លងដើម្បីប្តូរឈ្មោះវា។</i>"
-                )
+                # Escape & in URL for HTML href
+                safe_url = (direct_url or "").replace('&', '&amp;')
+                
+                if safe_url:
+                    result_text = (
+                        f"⚠️ <b>ឯកសារធំពេកសម្រាប់ Telegram (>50MB)</b>\n\n"
+                        f"🔗 តំណភ្ជាប់ទាញយកជំនួសពី Browser៖\n"
+                        f'<a href="{safe_url}">ទាញយកតាមរយៈ Browser</a>\n\n'
+                        f"📋 <b>ឈ្មោះឯកសារ (ចុចលើវាដើម្បីចម្លង)៖</b>\n"
+                        f"<code>{clean_filename}</code>\n\n"
+                        f"<i>ចំណាំ៖ ការទាញយកតាម Browser នឹងមានឈ្មោះឯកសារលំនាំដើមរបស់ប្រប្រព័ន្ធ។ អ្នកអាចបិទភ្ជាប់ឈ្មោះដែលបានចម្លងដើម្បីប្តូរឈ្មោះវា។</i>"
+                    )
+                else:
+                    result_text = (
+                        f"⚠️ <b>ឯកសារធំពេកសម្រាប់ Telegram (>50MB)</b>\n\n"
+                        f"មិនអាចបញ្ជូនទៅ Telegram បានទេ ហើយគ្មានតំណភ្ជាប់ទាញយកផ្ទាល់ឡើយ។"
+                    )
             else:
-                result_text = (
-                    f"⚠️ <b>ឯកសារធំពេកសម្រាប់ Telegram (>50MB)</b>\n\n"
-                    f"💾 បានរក្សាទុកក្នុងថត Downloads លើកុំព្យូទ័ររបស់អ្នក៖\n"
-                    f"<code>{os.path.basename(pc_path)}</code>"
-                )
+                # Save to PC Downloads locally
+                pc_path = os.path.join(PC_DOWNLOADS_DIR, clean_filename)
+                counter = 1
+                base, extension = os.path.splitext(pc_path)
+                while os.path.exists(pc_path):
+                    pc_path = f"{base}_{counter}{extension}"
+                    counter += 1
+                    
+                shutil.move(file_path, pc_path)
+                file_path = None # Set to None so finally block doesn't delete it
+                
+                # Escape & in URL for HTML href
+                safe_url = (direct_url or "").replace('&', '&amp;')
+                
+                if safe_url:
+                    result_text = (
+                        f"⚠️ <b>ឯកសារធំពេកសម្រាប់ Telegram (>50MB)</b>\n\n"
+                        f"💾 បានរក្សាទុកក្នុងថត Downloads លើកុំព្យូទ័ររបស់អ្នក៖\n"
+                        f"<code>{os.path.basename(pc_path)}</code>\n\n"
+                        f"🔗 តំណភ្ជាប់ទាញយកជំនួសពី Browser៖\n"
+                        f'<a href="{safe_url}">ទាញយកតាមរយៈ Browser</a>\n\n'
+                        f"📋 <b>ឈ្មោះឯកសារ (ចុចលើវាដើម្បីចម្លង)៖</b>\n"
+                        f"<code>{os.path.basename(pc_path)}</code>\n\n"
+                        f"<i>ចំណាំ៖ ការទាញយកតាម Browser នឹងមានឈ្មោះឯកសារលំនាំដើមរបស់ប្រប្រព័ន្ធ។ អ្នកអាចបិទភ្ជាប់ឈ្មោះដែលបានចម្លងដើម្បីប្តូរឈ្មោះវា។</i>"
+                    )
+                else:
+                    result_text = (
+                        f"⚠️ <b>ឯកសារធំពេកសម្រាប់ Telegram (>50MB)</b>\n\n"
+                        f"💾 បានរក្សាទុកក្នុងថត Downloads លើកុំព្យូទ័ររបស់អ្នក៖\n"
+                        f"<code>{os.path.basename(pc_path)}</code>"
+                    )
                 
             bot.edit_message_text(
                 result_text,
